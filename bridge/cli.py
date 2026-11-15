@@ -85,7 +85,7 @@ def cmd_login(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------- status / probe
 
 
-async def _engine_call(settings: Settings, what: str) -> Any:
+async def _engine_call(settings: Settings, what: str, **kwargs: Any) -> Any:
     from .drivers import build_driver
     from .engine import Engine
 
@@ -95,7 +95,9 @@ async def _engine_call(settings: Settings, what: str) -> Any:
         if what == "status":
             return await engine.status()
         if what == "probe":
-            return await engine.probe()
+            return await engine.probe(**kwargs)
+        if what == "reset":
+            return await engine.reset()
         raise ValueError(what)
     finally:
         await engine.stop()
@@ -117,7 +119,23 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 def cmd_probe(args: argparse.Namespace) -> int:
     settings = _settings(args)
-    _print_json(asyncio.run(_engine_call(settings, "probe")))
+    _print_json(asyncio.run(_engine_call(settings, "probe", save=args.save)))
+    return 0
+
+
+def cmd_reset(args: argparse.Namespace) -> int:
+    """Снять залипшую генерацию и очистить поле ввода — без ручных кликов в браузере."""
+    settings = _settings(args)
+    if args.remote and _maybe_remote(settings, args) is not None:
+        import httpx
+
+        base = args.url or f"http://{settings.host}:{settings.port}"
+        headers = {"Authorization": f"Bearer {args.token}"} if args.token or settings.token else {}
+        response = httpx.post(f"{base}/v1/debug/recover", headers=headers, timeout=90.0)
+        response.raise_for_status()
+        _print_json(response.json())
+        return 0
+    _print_json(asyncio.run(_engine_call(settings, "reset")))
     return 0
 
 
@@ -301,12 +319,16 @@ def build_parser() -> argparse.ArgumentParser:
     add("status", "состояние моста/браузера", cmd_status).add_argument(
         "--local", action="store_true", help="не ходить на сервер, поднять свой браузер"
     )
-    add("probe", "что видят селекторы на странице (для починки после редизайна)", cmd_probe)
+    probe = add("probe", "что видят селекторы на странице (для починки после редизайна)", cmd_probe)
+    probe.add_argument("--save", action="store_true", help="сохранить дамп (со снимком HTML) в data/debug/")
     chat = add("chat", "отправить сообщение через мост", cmd_chat)
     chat.add_argument("message", nargs="*", help="без аргумента — интерактивный режим")
     chat.add_argument("--model", default="deepseek-chat")
     chat.add_argument("--session", help="продолжить диалог")
     chat.add_argument("--stream", action="store_true", help="печатать ответ по мере генерации")
+    add("reset", "отменить залипшую генерацию и освободить поле ввода", cmd_reset).add_argument(
+        "--remote", action="store_true", help="дёрнуть запущенный мост вместо своего браузера"
+    )
     add("selftest", "проверить HTTP-контракт на фейковом драйвере (без браузера)", cmd_selftest)
     return parser
 

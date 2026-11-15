@@ -240,3 +240,40 @@ def test_truncated_generation_reports_length_finish_reason(tmp_path):
     assert completion.text == "всё, что успели прочитать"
     assert completion.rebuilt_context is True
     assert engine._stats["requests"] == 1 and engine._stats["completed"] == 1
+
+
+def test_engine_recovers_page_after_failed_generation(tmp_path):
+    """После сбоя движок обязан попросить драйвер «успокоиться» — иначе следующий запрос не уйдёт.
+
+    Это и есть «надо вручную открыть новый чат»: страница оставалась в режиме
+    генерации с заблокированным полем ввода.
+    """
+    class ExplodingDriver(ScriptedDriver):
+        async def send(self, prompt, *, reasoning=False):
+            raise RuntimeError("страница упала")
+            yield  # pragma: no cover
+
+    from bridge.config import Settings
+
+    settings = Settings(provider="fake", data_dir=tmp_path / "data", poll_ms=1, stable_polls=1)
+    driver = ExplodingDriver()
+    engine = Engine(settings, driver, SessionStore(settings.sessions_dir))
+    run(engine.start())
+
+    with pytest.raises(RuntimeError):
+        run(engine.complete(messages(("user", "привет"))))
+    assert driver.recover_calls == 1
+    assert driver.idle_calls >= 1  # ensure_idle вызывается и recovery-путём
+    assert engine._stats["failed"] == 1
+
+
+def test_engine_does_not_recover_on_success(tmp_path):
+    from bridge.config import Settings
+
+    settings = Settings(provider="fake", data_dir=tmp_path / "data", poll_ms=1, stable_polls=1)
+    driver = ScriptedDriver(reply="ok")
+    engine = Engine(settings, driver, SessionStore(settings.sessions_dir))
+    run(engine.start())
+    run(engine.complete(messages(("user", "привет"))))
+    assert driver.recover_calls == 0
+    assert engine._stats["completed"] == 1 and engine._stats["failed"] == 0

@@ -19,9 +19,14 @@ from typing import Any, AsyncIterator, Protocol, runtime_checkable
 # Переопределить без правки кода можно файлом selectors.json.
 DEFAULT_SELECTORS: dict[str, str] = {
     "input": 'textarea#chat-input || div[contenteditable="true"][id="chat-input"] || #chat-input || textarea[placeholder]',
-    "send_button": 'button[aria-label="Send"] || button[aria-label="Отправить"] || div[id="input-box-action"] button:last-child',
-    "stop_button": 'button[aria-label="Stop"] || button[aria-label="Остановить"] || button[aria-label="Stop loading"]',
-    "assistant_message": ".message-content .ds-markdown || .chat-response .ds-markdown || [class*='markdown-body']",
+    "send_button": 'button[aria-label="Send"] || button[aria-label*="Send"i] || button[aria-label="Отправить"] '
+    '|| button[data-testid="send"] || [id*="input-box"] button:last-child',
+    "stop_button": 'button[aria-label="Stop"] || button[aria-label*="Stop"i] || button[aria-label*="Останов"] '
+    '|| button[data-testid="stop"] || [class*="stop-generating"]',
+    # Тот же селектор матчит и бабл пользователя: потому ответ определяется диффом
+    # по содержимому (`pick_answer`), а не «сколько блоков стало».
+    "assistant_message": '.message-content .ds-markdown || .chat-response .ds-markdown || [class*="ds-markdown"] '
+    "|| [class*='markdown-body'] || .markdown-body",
     "user_message": ".chat-box .ds-markdown || .chat-prompt .ds-markdown",
     "new_chat_button": 'button[aria-label="Create a new chat"] || button[aria-label="New chat"] || .new-chat-button',
     "sign_in_marker": 'input[type="password"] || button:has-text("Log in") || div[class*="sign-in"]',
@@ -69,7 +74,8 @@ class Selectors:
         raw = json.loads(file.read_text(encoding="utf-8"))
         if not isinstance(raw, dict):
             raise ValueError("selectors.json должен быть объектом {ключ: селектор}")
-        return cls(raw)
+        # ключи с подчёркиванием — комментарии в JSON, их не надо искать на странице
+        return cls({k: v for k, v in raw.items() if not k.startswith("_")})
 
     def candidates(self, key: str) -> list[str]:
         raw = self._map.get(key, "")
@@ -113,7 +119,18 @@ class ConversationDriver(Protocol):
         Движок сам превращает снапшоты в дельты — драйверу не надо считать diff.
         """
 
-    async def probe(self) -> dict[str, Any]:
+    async def ensure_idle(self, timeout_s: float | None = None) -> bool:
+        """Привести страницу в покой (снять «генерирует», вычистить поле ввода)."""
+
+    async def recover(self) -> None:
+        """Вызывается движком ПОСЛЕ неудачной генерации.
+
+        Без этого шага оборванная генерация оставляет страницу занятой, и
+        следующий запрос упирается в заблокированное поле ввода — лечится только
+        ручным «новым чатом». Никогда не бросает.
+        """
+
+    async def probe(self, *, reason: str = "manual", save: bool | None = None) -> dict[str, Any]:
         """Диагностика: какие селекторы находятся, что на странице."""
 
     # Необязательный, но уважаемый движком атрибут: `True`, если ответ оборвался
@@ -134,6 +151,8 @@ class ScriptedDriver:
 
     def __init__(self, reply: str = "Это ответ от фейкового драйвера.", chunk_size: int = 12) -> None:
         self.reply = reply
+        self.idle_calls = 0
+        self.recover_calls = 0
         self.chunk_size = chunk_size
         self.prompts: list[str] = []
         self.begin_chat_calls = 0
@@ -157,6 +176,15 @@ class ScriptedDriver:
     async def begin_chat(self) -> None:
         self.begin_chat_calls += 1
 
+    async def ensure_idle(self, timeout_s: float | None = None) -> bool:
+        self.idle_calls += 1
+        return True
+
+    async def recover(self) -> None:
+        # как в живом драйвере: восстановление = «успокоить страницу»
+        self.recover_calls += 1
+        await self.ensure_idle()
+
     async def send(self, prompt: str, *, reasoning: bool = False) -> AsyncIterator[str]:
         import asyncio
 
@@ -171,5 +199,5 @@ class ScriptedDriver:
         if emitted < len(text):
             yield text  # хвост короче шага; дубликат «последнего снапшота» не отдаём
 
-    async def probe(self) -> dict[str, Any]:
-        return {"driver": self.name, "url": "fake://chat", "selectors": {}}
+    async def probe(self, *, reason: str = "manual", save: bool | None = None) -> dict[str, Any]:
+        return {"driver": self.name, "url": "fake://chat", "reason": reason, "selectors": {}}

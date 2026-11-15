@@ -73,3 +73,11 @@ def test_web_driver_reports_not_ready_without_browser(tmp_path):
         asyncio.run(go())
     # probe не бросает — он и нужен, чтобы диагностировать «браузера нет»
     assert asyncio.run(driver.probe())["running"] is False
+
+
+def test_selectors_file_ignores_comment_keys(tmp_path):
+    path = tmp_path / "selectors.json"
+    path.write_text(json.dumps({"_comment": "подсказка", "input": "#own"}), encoding="utf-8")
+    selectors = Selectors.load(path)
+    assert selectors.candidates("_comment") == []
+    assert "input" in selectors.as_dict() and "_comment" not in selectors.as_dict()
