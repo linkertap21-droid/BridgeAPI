@@ -37,7 +37,10 @@ class NeedLogin(BridgeError):
     def __init__(self) -> None:
         super().__init__(
             "Браузер моста не залогинен в chat.deepseek.com.",
-            hint="Запусти `python -m bridge.cli login`, войди в аккаунт и повтори запрос.",
+            hint=(
+                "Запусти `python -m bridge.cli login`, войди в аккаунт и повтори запрос. "
+                "Если чат открыт, но «залип» — сначала `python -m bridge.cli reset`."
+            ),
         )
 
 
@@ -64,10 +67,16 @@ class GenerationTimeout(BridgeError):
     status_code = 504
     code = "generation_timeout"
 
-    def __init__(self, timeout_s: float) -> None:
+    def __init__(
+        self,
+        timeout_s: float,
+        *,
+        message: str | None = None,
+        hint: str | None = None,
+    ) -> None:
         super().__init__(
-            f"DeepSeek не закончил генерацию за {timeout_s:.0f} с.",
-            hint="Увеличь BRIDGE_GENERATION_TIMEOUT_S или отправь более короткий запрос.",
+            message or f"DeepSeek не закончил генерацию за {timeout_s:.0f} с.",
+            hint=hint or "Увеличь BRIDGE_GENERATION_TIMEOUT_S или отправь более короткий запрос.",
         )
 
 

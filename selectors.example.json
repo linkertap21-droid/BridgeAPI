@@ -1,9 +1,10 @@
 {
-  "_comment": "Скопируй в selectors.json, если DeepSeek сменит вёрстку. Значения — через || несколько вариантов. /v1/debug/probe покажет, какие селекторы не находятся.",
-  "input": "textarea#chat-input",
-  "send_button": "button[aria-label=\"Send\"]",
-  "stop_button": "button[aria-label=\"Stop\"]",
-  "assistant_message": ".message-content .ds-markdown",
-  "new_chat_button": "button[aria-label=\"Create a new chat\"]",
-  "think_toggle": "button[aria-label*=\"DeepThink\"]"
+  "_comment": "Скопируй в selectors.json, если DeepSeek сменит вёрстку. Значения — через || несколько вариантов (пробуются по очереди). /v1/debug/probe покажет, какие ключи не находятся; data/debug/*.json — снимок страницы в момент сбоя.",
+  "input": "textarea#chat-input || div[contenteditable=\"true\"][id=\"chat-input\"] || #chat-input",
+  "send_button": "button[aria-label=\"Send\"] || button[aria-label*=\"Send\"i] || button[data-testid=\"send\"]",
+  "stop_button": "button[aria-label=\"Stop\"] || button[aria-label*=\"Stop\"i] || button[aria-label*=\"Останов\"]",
+  "assistant_message": ".message-content .ds-markdown || .chat-response .ds-markdown || [class*=\"ds-markdown\"]",
+  "new_chat_button": "button[aria-label=\"Create a new chat\"] || button[aria-label*=\"new chat\"i]",
+  "think_toggle": "button[aria-label*=\"DeepThink\"] || button:has-text(\"深度思考\")",
+  "_sign_in_marker": "если мост пишет login_required — ты на /sign-in: `python -m bridge.cli login`"
 }

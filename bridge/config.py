@@ -90,8 +90,14 @@ class Settings:
     ready_timeout_s: int = 20
 
     generation_timeout_s: int = 240
+    start_timeout_s: int = 25
+    send_wait_s: int = 10
+    idle_wait_s: int = 45
     poll_ms: int = 350
     stable_polls: int = 3
+    answer_window: int = 10
+    submit: str = "auto"
+    debug_dump: bool = True
     max_waiters: int = 8
     queue_wait_s: int = 120
     keep_browser_open: bool = True
@@ -119,8 +125,14 @@ class Settings:
             login_timeout_s=_int("BRIDGE_LOGIN_TIMEOUT_S", 600),
             ready_timeout_s=_int("BRIDGE_READY_TIMEOUT_S", 20),
             generation_timeout_s=_int("BRIDGE_GENERATION_TIMEOUT_S", 240),
+            start_timeout_s=_int("BRIDGE_START_TIMEOUT_S", 25),
+            send_wait_s=_int("BRIDGE_SEND_WAIT_S", 10),
+            idle_wait_s=_int("BRIDGE_IDLE_WAIT_S", 45),
             poll_ms=_int("BRIDGE_POLL_MS", 350),
             stable_polls=_int("BRIDGE_STABLE_POLLS", 3),
+            answer_window=_int("BRIDGE_ANSWER_WINDOW", 10),
+            submit=_str("BRIDGE_SUBMIT", "auto").lower(),
+            debug_dump=_bool("BRIDGE_DEBUG_DUMP", True),
             max_waiters=_int("BRIDGE_MAX_WAITERS", 8),
             queue_wait_s=_int("BRIDGE_QUEUE_WAIT_S", 120),
             keep_browser_open=_bool("BRIDGE_KEEP_BROWSER_OPEN", True),
@@ -144,6 +156,11 @@ class Settings:
     def sessions_dir(self) -> Path:
         return self.data_dir / "sessions"
 
+    @property
+    def debug_dir(self) -> Path:
+        """Дампы страницы при сбоях: без них правка селекторов — угадывание."""
+        return self.data_dir / "debug"
+
     def ensure_dirs(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.sessions_dir.mkdir(parents=True, exist_ok=True)
@@ -158,6 +175,8 @@ class Settings:
             "generation_timeout_s": self.generation_timeout_s,
             "poll_ms": self.poll_ms,
             "stable_polls": self.stable_polls,
+            "submit": self.submit,
+            "debug_dump": self.debug_dump,
             "data_dir": str(self.data_dir),
             "auth_required": bool(self.token),
         }

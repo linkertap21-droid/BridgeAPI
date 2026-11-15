@@ -90,7 +90,7 @@ def build_app(
 
     app = FastAPI(
         title="BridgeAPI — локальный мост к DeepSeek",
-        version="0.1.0",
+        version="0.2.0",
         description="REST/OpenAI-совместимый API поверх твоего браузера с chat.deepseek.com, без API-ключа.",
         lifespan=lifespan,
     )
@@ -205,8 +205,14 @@ def build_app(
         return {"ok": True, "detail": "браузер закрыт; чтобы забыть аккаунт — удали data/browser-profile"}
 
     @app.api_route("/v1/debug/probe", methods=["GET", "POST"], dependencies=[Depends(require_token)])
-    async def debug_probe(request: Request) -> dict[str, Any]:
-        return await get_engine(request).probe()
+    async def debug_probe(request: Request, save: bool = Query(False)) -> dict[str, Any]:
+        """Что нашли селекторы; `?save=true` — сохранить дамп страницы в data/debug/."""
+        return await get_engine(request).probe(save=save)
+
+    @app.post("/v1/debug/recover", dependencies=[Depends(require_token)])
+    async def debug_recover(request: Request) -> dict[str, Any]:
+        """Снять залипшую генерацию и освободить поле ввода (чинит «надо вручную открыть новый чат»)."""
+        return await get_engine(request).reset()
 
     # ------------------------------------------------------------------ диалоги
 

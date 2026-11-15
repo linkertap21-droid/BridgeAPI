@@ -161,6 +161,7 @@ class Engine:
         self.store = store or SessionStore(settings.sessions_dir)
         self._lock = asyncio.Lock()
         self._waiters = 0
+        self._tasks: set = set()  # fire-and-forget задачи санации/дампов
         self._stats: dict[str, Any] = {
             "requests": 0,      # сколько раз просили сгенерировать
             "completed": 0,     # ...из них дошло до клиента непустым ответом
@@ -193,8 +194,19 @@ class Engine:
             "config": self.settings.public_dict(),
         }
 
-    async def probe(self) -> dict[str, Any]:
-        return await self.driver.probe()
+    async def probe(self, **kwargs: Any) -> dict[str, Any]:
+        return await self.driver.probe(**kwargs)
+
+    async def reset(self) -> dict[str, Any]:
+        """Принудительно вернуть страницу в покой (кнопка Stop + чистка поля ввода).
+
+        Ручная кнопка «всё застыло»: после обрыва или упавшей вёрстки мост умеет
+        восстановиться сам, но этот эндпоинт позволяет сделать это по требованию.
+        """
+        ensure = getattr(self.driver, "ensure_idle", None)
+        idle = bool(await ensure()) if ensure is not None else False
+        status = await self.driver.status()
+        return {"idle": idle, "browser": status.to_dict(), "driver": self.driver.name}
 
     async def login(self) -> dict[str, Any]:
         ok = await self.driver.login(self.settings.login_timeout_s)
@@ -257,6 +269,7 @@ class Engine:
         text = ""
         sent_len = 0
         completed = False
+        needs_recover = False
         try:
             status = await self.driver.status()
             if not status.running:
@@ -279,8 +292,15 @@ class Engine:
                     text = snapshot
                     yield delta
             completed = True
+        except (asyncio.CancelledError, GeneratorExit):
+            # Клиент ушёл или поток закрыли: ждать здесь нельзя (генератор уже
+            # закрывается), поэтому санацию ставим задачей и сразу отдаём отмену.
+            self._stats["failed"] += 1
+            self._schedule_recover()
+            raise
         except Exception:
             self._stats["failed"] += 1
+            needs_recover = True
             raise
         finally:
             elapsed = time.monotonic() - started
@@ -306,7 +326,29 @@ class Engine:
                 elapsed_s=round(elapsed, 2),
             )
             handle.meta = {"driver": self.driver.name, "completed": completed}
+            if needs_recover:
+                # Страница после сбоя остаётся «говорящей» и с текстом в поле:
+                # без this шаг следующий запрос пришлось бы начинать вручную.
+                await self._recover()
             self._release()
+
+    async def _recover(self) -> None:
+        """Попросить драйвер привести страницу в покой. Ошибки глотаем: это уже починка."""
+        recover = getattr(self.driver, "recover", None)
+        if recover is None:
+            return
+        try:
+            await recover()
+        except Exception:
+            pass
+
+    def _schedule_recover(self) -> None:
+        try:
+            task = asyncio.get_running_loop().create_task(self._recover())
+        except RuntimeError:  # нет цикла — например, синхронный вызов из теста
+            return
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
 
     async def _send(self, prompt: str, *, reasoning: bool) -> AsyncIterator[str]:
         stream = self.driver.send(prompt, reasoning=reasoning)
